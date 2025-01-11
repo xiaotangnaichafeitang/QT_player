@@ -11,24 +11,32 @@ CONFIG += c++17
 SOURCES += \
     ctrlbar.cpp \
     displaywind.cpp \
+    ff_ffplay.cpp \
+    ff_ffplay_def.cpp \
     ffmsg_queue.cpp \
+    ijkmediaplayer.cpp \
     main.cpp \
-    mainwindow.cpp \
+    mainwind.cpp \
     playlistwind.cpp \
     titlebar.cpp
 
 HEADERS += \
     ctrlbar.h \
     displaywind.h \
+    ff_ffplay.h \
+    ff_ffplay_def.h \
+    ffmsg.h \
     ffmsg_queue.h \
-    mainwindow.h \
+    ijkmediaplayer.h \
+    mainwind.h \
     playlistwind.h \
-    titlebar.h
+    titlebar.h \
+    ff_fferror.h
 
 FORMS += \
     ctrlbar.ui \
     displaywind.ui \
-    mainwindow.ui \
+    mainwind.ui \
     playlistwind.ui \
     titlebar.ui
 

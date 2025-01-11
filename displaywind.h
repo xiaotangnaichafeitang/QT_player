@@ -12,7 +12,7 @@ class DisplayWind : public QWidget
     Q_OBJECT
 
 public:
-    explicit DisplayWind(QWidget *parent = nullptr);
+    explicit DisplayWind(QWidget *parent = 0);
     ~DisplayWind();
 
 private:

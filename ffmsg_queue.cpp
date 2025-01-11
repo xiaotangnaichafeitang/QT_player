@@ -133,7 +133,7 @@ void msg_queue_init(MessageQueue *q)
     q->cond = SDL_CreateCond();
     q->abort_request = 1;
 }
-// 消息队列flush，清空所有的消息
+ // 消息队列flush，清空所有的消息
 void msg_queue_flush(MessageQueue *q)
 {
     AVMessage *msg, *msg1;
@@ -155,18 +155,18 @@ void msg_queue_destroy(MessageQueue *q)
 {
     msg_queue_flush(q);
 
-    SDL_LockMutex(q->mutex);
-    while(q->recycle_msg) {
-        AVMessage *msg = q->recycle_msg;
-        if (msg)
-            q->recycle_msg = msg->next;
-        msg_free_res(msg);
-        av_freep(&msg);
-    }
-    SDL_UnlockMutex(q->mutex);
+   SDL_LockMutex(q->mutex);
+   while(q->recycle_msg) {
+       AVMessage *msg = q->recycle_msg;
+       if (msg)
+           q->recycle_msg = msg->next;
+       msg_free_res(msg);
+       av_freep(&msg);
+   }
+   SDL_UnlockMutex(q->mutex);
 
-    SDL_DestroyMutex(q->mutex);
-    SDL_DestroyCond(q->cond);
+   SDL_DestroyMutex(q->mutex);
+   SDL_DestroyCond(q->cond);
 }
 // 消息队列终止
 void msg_queue_abort(MessageQueue *q)
@@ -207,7 +207,7 @@ int msg_queue_get(MessageQueue *q, AVMessage *msg, int block)
         //获取消息
         msg1 = q->first_msg;
         if(msg1) {
-            q->first_msg = msg->next;
+            q->first_msg = msg1->next;
             if(!q->first_msg)
                 q->last_msg = NULL;
             q->nb_messages--;
@@ -216,6 +216,7 @@ int msg_queue_get(MessageQueue *q, AVMessage *msg, int block)
             msg1->next = q->recycle_msg;
             q->recycle_msg = msg1;
             ret =1;
+            break;      // 记得这里有个break的
         } else if (!block) {
             ret = 0;
             break;
@@ -223,38 +224,39 @@ int msg_queue_get(MessageQueue *q, AVMessage *msg, int block)
             SDL_CondWait(q->cond, q->mutex);
         }
     }
+    SDL_UnlockMutex(q->mutex);
     return ret;
 }
 // 消息删除 把队列里同一消息类型的消息全删除掉
 void msg_queue_remove(MessageQueue *q, int what)
 {
     AVMessage **p_msg, *msg, *last_msg;
-    SDL_LockMutex(q->mutex);
+        SDL_LockMutex(q->mutex);
 
-    last_msg = q->first_msg;
+        last_msg = q->first_msg;
 
-    if (!q->abort_request && q->first_msg) {
-        p_msg = &q->first_msg;
-        while (*p_msg) {
-            msg = *p_msg;
-            if (msg->what == what) {        // 同类型的消息全部删除
-                *p_msg = msg->next;
-                msg_free_res(msg);
-                msg->next = q->recycle_msg;     // 消息体回收
-                q->recycle_msg = msg;
-                q->nb_messages--;
+        if (!q->abort_request && q->first_msg) {
+            p_msg = &q->first_msg;
+            while (*p_msg) {
+                msg = *p_msg;
+                if (msg->what == what) {        // 同类型的消息全部删除
+                    *p_msg = msg->next;
+                    msg_free_res(msg);
+                    msg->next = q->recycle_msg;     // 消息体回收
+                    q->recycle_msg = msg;
+                    q->nb_messages--;
+                } else {
+                    last_msg = msg;
+                    p_msg = &msg->next;
+                }
+            }
+
+            if (q->first_msg) {
+                q->last_msg = last_msg;
             } else {
-                last_msg = msg;
-                p_msg = &msg->next;
+                q->last_msg = NULL;
             }
         }
 
-        if (q->first_msg) {
-            q->last_msg = last_msg;
-        } else {
-            q->last_msg = NULL;
-        }
-    }
-
-    SDL_UnlockMutex(q->mutex);
+        SDL_UnlockMutex(q->mutex);
 }

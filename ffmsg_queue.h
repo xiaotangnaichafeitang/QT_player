@@ -2,24 +2,6 @@
 #define FFMSG_QUEUE_H
 
 #include "SDL.h"
-extern "C" {
-#include "libavutil/avstring.h"
-#include "libavutil/eval.h"
-#include "libavutil/mathematics.h"
-#include "libavutil/pixdesc.h"
-#include "libavutil/imgutils.h"
-#include "libavutil/dict.h"
-#include "libavutil/parseutils.h"
-#include "libavutil/samplefmt.h"
-#include "libavutil/avassert.h"
-#include "libavutil/time.h"
-#include "libavformat/avformat.h"
-#include "libavdevice/avdevice.h"
-#include "libswscale/swscale.h"
-#include "libavutil/opt.h"
-#include "libavcodec/avfft.h"
-#include "libswresample/swresample.h"
-}
 
 typedef struct AVMessage {
     int what;           // 消息类型
@@ -42,6 +24,7 @@ typedef struct MessageQueue {   // 消息队列
     int alloc_count;    // 分配的次数
 } MessageQueue;
 
+
 // 释放msg的obj资源
 void msg_free_res(AVMessage *msg);
 // 私有插入消息
@@ -62,7 +45,7 @@ void msg_obj_free_l(void *obj);
 void msg_queue_put_simple4(MessageQueue *q, int what, int arg1, int arg2, void *obj, int obj_len);
 // 消息队列初始化
 void msg_queue_init(MessageQueue *q);
-    // 消息队列flush，清空所有的消息
+ // 消息队列flush，清空所有的消息
 void msg_queue_flush(MessageQueue *q);
 // 消息销毁
 void msg_queue_destroy(MessageQueue *q);
@@ -75,12 +58,6 @@ void msg_queue_start(MessageQueue *q);
 int msg_queue_get(MessageQueue *q, AVMessage *msg, int block);
 // 消息删除 把队列里同一消息类型的消息全删除掉
 void msg_queue_remove(MessageQueue *q, int what);
-
-class FFmsg_Queue
-{
-public:
-    FFmsg_Queue();
-};
 
 
 #endif // FFMSG_QUEUE_H

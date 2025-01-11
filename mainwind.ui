@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>MainWindow</class>
- <widget class="QMainWindow" name="MainWindow">
+ <class>MainWind</class>
+ <widget class="QMainWindow" name="MainWind">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -72,7 +72,7 @@
      <x>0</x>
      <y>0</y>
      <width>1280</width>
-     <height>21</height>
+     <height>26</height>
     </rect>
    </property>
   </widget>
@@ -118,6 +118,12 @@
    <container>1</container>
   </customwidget>
   <customwidget>
+   <class>TitleBar</class>
+   <extends>QWidget</extends>
+   <header location="global">titlebar.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
    <class>PlayListWind</class>
    <extends>QWidget</extends>
    <header location="global">playlistwind.h</header>
@@ -127,12 +133,6 @@
    <class>DisplayWind</class>
    <extends>QWidget</extends>
    <header location="global">displaywind.h</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>TitleBar</class>
-   <extends>QLabel</extends>
-   <header location="global">titlebar.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>
