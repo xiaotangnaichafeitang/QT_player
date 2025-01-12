@@ -53,7 +53,7 @@ int MainWind::message_loop(void *arg)
         msg_free_res(&msg);
 //        qDebug() << "message_loop sleep, mp:" << mp;
         // 先模拟线程运行
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     }
     qDebug() << "message_loop leave";

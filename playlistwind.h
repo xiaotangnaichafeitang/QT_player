@@ -12,7 +12,7 @@ class PlayListWind : public QWidget
     Q_OBJECT
 
 public:
-    explicit PlayListWind(QWidget *parent = nullptr);
+    explicit PlayListWind(QWidget *parent = 0);
     ~PlayListWind();
 
 private:

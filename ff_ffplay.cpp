@@ -142,7 +142,7 @@ int FFPlayer::stream_component_open(int stream_index)
     if (ret < 0)
         goto fail;
     // 设置pkt_timebase
-//    avctx->pkt_timebase = ic->streams[stream_index]->time_base;
+    avctx->pkt_timebase = ic->streams[stream_index]->time_base;
 
     /* 根据codec_id查找解码器 */
     codec = avcodec_find_decoder(avctx->codec_id);
@@ -169,19 +169,19 @@ int FFPlayer::stream_component_open(int stream_index)
         audio_st = ic->streams[stream_index];  // 获取audio的stream指针
 
          // 初始化ffplay封装的音频解码器, 并将解码器上下文 avctx和Decoder绑定
-//        decoder_init
+        auddec.decoder_init(avctx, &audioq);
         // 启动音频解码线程
-//        decoder_start
+        auddec.decoder_start(AVMEDIA_TYPE_AUDIO, "audio_thread", this);
         // 允许音频输出
         break;
     case AVMEDIA_TYPE_VIDEO:
         video_stream = stream_index;    // 获取video的stream索引
         video_st = ic->streams[stream_index];// 获取video的stream指针
 //        // 初始化ffplay封装的视频解码器
-////        decoder_init(&is->viddec, avctx, &is->videoq, is->continue_read_thread);
+       viddec.decoder_init(avctx, &videoq); //  is->continue_read_thread
 //        // 启动视频频解码线程
-////        if ((ret = decoder_start(&is->viddec, video_thread, "video_decoder", is)) < 0)
-////            goto out;
+        if ((ret = viddec.decoder_start(AVMEDIA_TYPE_VIDEO, "video_decoder", this)) < 0)
+            goto out;
         break;
     default:
         break;
@@ -207,9 +207,10 @@ void FFPlayer::stream_component_close(int stream_index)
     case AVMEDIA_TYPE_AUDIO:
         std::cout << __FUNCTION__ << "  AVMEDIA_TYPE_AUDIO\n";
         // 请求终止解码器线程
+        auddec.decoder_abort(&sampq);
         // 关闭音频设备
         // 销毁解码器
-
+        auddec.decoder_destroy();
         // 释放重采样器
         // 释放audio buf
 //        decoder_abort(&is->auddec, &is->sampq); // 解码器线程请求abort的时候有调用 packet_queue_abort
@@ -225,8 +226,8 @@ void FFPlayer::stream_component_close(int stream_index)
         // 请求终止解码器线程
         // 关闭音频设备
         // 销毁解码器
-//        decoder_abort(&is->viddec, &is->pictq);
-//        decoder_destroy(&is->viddec);
+        viddec.decoder_abort(&pictq);
+        viddec.decoder_destroy();
         break;
 
     default:
@@ -340,7 +341,7 @@ int FFPlayer::read_thread()
     while (1) {
 //        std::cout << "read_thread sleep, mp:" << this << std::endl;
         // 先模拟线程运行
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         if(abort_request) {
             break;
         }
@@ -351,4 +352,46 @@ int FFPlayer::read_thread()
     return 0;
     fail:
     return -1;
+}
+
+Decoder::Decoder()
+{
+    av_init_packet(&pkt_);
+}
+
+Decoder::~Decoder()
+{
+
+}
+
+void Decoder::decoder_init(AVCodecContext *avctx, PacketQueue *queue)
+{
+    avctx_ = avctx;
+    queue_ = queue;
+}
+
+int Decoder::decoder_start(AVMediaType codec_type, const char *thread_name, void *arg)
+{
+    // 启用包队列
+    packet_queue_start(queue_);
+    // 创建线程
+    if(AVMEDIA_TYPE_VIDEO == codec_type)
+        decoder_thread_ = new std::thread(&Decoder::video_thread, this, arg);
+    else if (AVMEDIA_TYPE_AUDIO == codec_type)
+        decoder_thread_ = new std::thread(&Decoder::audio_thread, this, arg);
+    else
+        return -1;
+    return 0;
+}
+
+void Decoder::decoder_abort(FrameQueue *fq)
+{
+    packet_queue_abort(queue_);     // 请求退出包队列
+    frame_queue_signal(fq);     // 唤醒阻塞的帧队列
+    if(decoder_thread_ && decoder_thread_->joinable()) {
+        decoder_thread_->join(); // 等待解码线程退出
+        delete decoder_thread_;
+        decoder_thread_ = NULL;
+    }
+    packet_queue_flush(queue_);  // 情况packet队列，并释放数据
 }
