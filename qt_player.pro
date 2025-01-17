@@ -31,7 +31,8 @@ HEADERS += \
     mainwind.h \
     playlistwind.h \
     titlebar.h \
-    ff_fferror.h
+    ff_fferror.h \
+    imagescaler.h
 
 FORMS += \
     ctrlbar.ui \

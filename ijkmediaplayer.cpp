@@ -27,6 +27,7 @@ int IjkMediaPlayer::ijkmp_create(std::function<int (void *)> msg_loop)
     if(ret < 0) {
         return -1;
     }
+
     return 0;
 }
 
@@ -112,6 +113,12 @@ int IjkMediaPlayer::ijkmp_msg_loop(void *arg)
 {
     msg_loop_(arg);
     return 0;
+}
+
+void IjkMediaPlayer::AddVideoRefreshCallback(
+        std::function<int (const Frame *)> callback)
+{
+    ffplayer_->AddVideoRefreshCallback(callback);
 }
 
 

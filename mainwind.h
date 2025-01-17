@@ -1,8 +1,8 @@
-#ifndef MAINWIND_H
+﻿#ifndef MAINWIND_H
 #define MAINWIND_H
 
 #include <QMainWindow>
-#include <ijkmediaplayer.h>
+#include "ijkmediaplayer.h"
 namespace Ui {
 class MainWind;
 }
@@ -16,7 +16,7 @@ public:
     ~MainWind();
     int InitSignalsAndSlots();
     int message_loop(void *arg);
-
+    int OutputVideo(const Frame *frame);
     void OnPlayOrPause();
     void OnStop();
 private:

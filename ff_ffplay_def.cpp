@@ -290,7 +290,6 @@ void frame_queue_push(FrameQueue *f)
 /* 释放当前frame，并更新读索引rindex */
 void frame_queue_next(FrameQueue *f)
 {
-
     frame_queue_unref_item(&f->queue[f->rindex]);
     if (++f->rindex == f->max_size)
         f->rindex = 0;

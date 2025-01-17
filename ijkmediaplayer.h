@@ -5,6 +5,7 @@
 #include <iostream>
 #include <thread>
 #include <functional>
+#include "ff_ffplay_def.h"
 #include "ff_ffplay.h"
 #include "ffmsg_queue.h"
 
@@ -151,6 +152,9 @@ public:
     void ijkmp_set_playback_volume(float volume);
 
     int ijkmp_msg_loop(void *arg);
+
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
+
 
 private:
     // 互斥量

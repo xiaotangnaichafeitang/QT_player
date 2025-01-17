@@ -3,6 +3,7 @@
 #include <thread>
 #include "ffmsg_queue.h"
 #include "ff_ffplay_def.h"
+#include <functional>
 
 
 class Decoder
@@ -55,8 +56,15 @@ public:
     MessageQueue msg_queue_;
     char *input_filename_;
     int read_thread();
-
     std::thread *read_thread_;
+
+    int video_refresh_thread();
+    void video_refresh(double *remaining_time);
+    // 视频画面输出相关
+    std::thread *video_refresh_thread_ = NULL;
+
+    std::function<int(const Frame *)> video_refresh_callback_ = NULL;
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
 
     // 帧队列
     FrameQueue	pictq;          // 视频Frame队列
@@ -80,9 +88,9 @@ public:
      AVFormatContext *ic = NULL;
 
      // 音频输出相关
-     struct AudioParams audio_src;           // 音频解码后的frame参数
-     struct AudioParams audio_tgt;       // SDL支持的音频参数，重采样转换：audio_src->audio_tgt
-     struct SwrContext *swr_ctx  = NULL;         // 音频重采样context
+     struct AudioParams audio_src;  // 保存最新解码的音频参数
+     struct AudioParams audio_tgt;  // 保存SDL音频输出需要的参数
+     struct SwrContext *swr_ctx = NULL;         // 音频重采样context
      int			audio_hw_buf_size = 0;          // SDL音频缓冲区的大小(字节为单位)
      // 指向待播放的一帧音频数据，指向的数据区将被拷入SDL音频缓冲区。若经过重采样则指向audio_buf1，
      // 否则指向frame中的音频
@@ -91,7 +99,6 @@ public:
      unsigned int		audio_buf_size = 0;     // 待播放的一帧音频数据(audio_buf指向)的大小
      unsigned int		audio_buf1_size = 0;    // 申请到的音频缓冲区audio_buf1的实际尺寸
      int			audio_buf_index = 0;            // 更新拷贝位置 当前音频帧中已拷入SDL音频缓冲区
-
 };
 
 inline static void ffp_notify_msg1(FFPlayer *ffp, int what) {

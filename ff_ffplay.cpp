@@ -91,6 +91,7 @@ int FFPlayer::stream_open(const char *file_name)
     read_thread_ = new std::thread(&FFPlayer::read_thread, this);
 
     // 创建视频刷新线程
+    video_refresh_thread_ = new std::thread(FFPlayer::video_refresh_thread, this);
     return 0;
 fail:
     stream_close();
@@ -235,6 +236,11 @@ void FFPlayer::stream_component_close(int stream_index)
         audio_buf = NULL;
         break;
     case AVMEDIA_TYPE_VIDEO:
+        // 请求退出视频画面刷新线程
+        if(video_refresh_thread_ && video_refresh_thread_->joinable()) {
+            video_refresh_thread_->join();  // 等待线程退出
+        }
+
         std::cout << __FUNCTION__ << "  AVMEDIA_TYPE_VIDEO\n";
         // 请求终止解码器线程
         // 关闭音频设备
@@ -283,7 +289,7 @@ static int audio_decode_frame(FFPlayer *is)
         // 若队列头部可读，则由af指向可读帧
         if (!(af = frame_queue_peek_readable(&is->sampq)))
             return -1;
-//        frame_queue_next(&is->sampq);
+
 //    } while (af->serial != is->audioq.serial);
 
 
@@ -291,10 +297,11 @@ static int audio_decode_frame(FFPlayer *is)
     // 根据frame中指定的音频参数获取缓冲区的大小 af->frame->channels * af->frame->nb_samples * 2
     data_size = av_samples_get_buffer_size(NULL,
                                            af->frame->channels,
-                                           af->frame->nb_samples, // 样本数量
+                                           af->frame->nb_samples,
                                            (enum AVSampleFormat)af->frame->format, 1);
     // 获取声道布局
-    dec_channel_layout =  (af->frame->channel_layout &&
+    dec_channel_layout = 2;
+            (af->frame->channel_layout &&
              af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
                 af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
     // 获取样本数校正值：若同步时钟是音频，则不调整样本数；否则根据同步需要调整样本数
@@ -343,7 +350,6 @@ static int audio_decode_frame(FFPlayer *is)
 
         // 重采样输出参数1：输出音频缓冲区
         uint8_t **out = &is->audio_buf1; //真正分配缓存audio_buf1，指向是用audio_buf
-
         // 重采样输出参数2：输出音频缓冲区尺寸， 高采样率往低采样率转换时得到更少的样本数量，比如 96k->48k, wanted_nb_samples=1024
         // 则wanted_nb_samples * is->audio_tgt.freq / af->frame->sample_rate 为1024*48000/96000 = 512
         // +256 的目的是重采样内部是有一定的缓存，就存在上一次的重采样还缓存数据和这一次重采样一起输出的情况，所以目的是多分配输出buffer
@@ -386,13 +392,14 @@ static int audio_decode_frame(FFPlayer *is)
         resampled_data_size = data_size;
     }
 
-    frame_queue_next(&is->sampq);       // 才会真正释放frame
+    frame_queue_next(&is->sampq);
 
     ret = resampled_data_size;
 
 fail:
     return ret;
 }
+
 
 
 /* prepare a new audio buffer */
@@ -403,9 +410,92 @@ fail:
  * @param len       需要拷贝的长度
  */
 static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
-{
+{ // 2ch 2字节 1024 = 4096 -> 回调每次读取2帧数据
+    FFPlayer *is = (FFPlayer *)opaque;
+    int audio_size, len1;
 
+    while (len > 0) {   // 循环读取，直到读取到足够的数据
+        /* (1)如果is->audio_buf_index < is->audio_buf_size则说明上次拷贝还剩余一些数据，
+         * 先拷贝到stream再调用audio_decode_frame
+         * (2)如果audio_buf消耗完了，则调用audio_decode_frame重新填充audio_buf
+         */
+        if (is->audio_buf_index >= is->audio_buf_size) {
+            audio_size = audio_decode_frame(is);
+            if (audio_size < 0) {
+                /* if error, just output silence */
+                is->audio_buf = NULL;
+                is->audio_buf_size = SDL_AUDIO_MIN_BUFFER_SIZE / is->audio_tgt.frame_size
+                        * is->audio_tgt.frame_size;
+            } else {
+
+                is->audio_buf_size = audio_size; // 讲字节 多少字节
+            }
+            is->audio_buf_index = 0;
+        }
+        //根据缓冲区剩余大小量力而行
+        len1 = is->audio_buf_size - is->audio_buf_index;
+        if (len1 > len)  // len = 3000 < len1 4096
+            len1 = len;
+
+        if (is->audio_buf)
+            memcpy(stream, (uint8_t *)is->audio_buf + is->audio_buf_index, len1);
+
+        len -= len1;
+        stream += len1;
+        /* 更新is->audio_buf_index，指向audio_buf中未被拷贝到stream的数据（剩余数据）的起始位置 */
+        is->audio_buf_index += len1;
+    }
 }
+
+
+// 先参考我们之前讲的06-sdl-pcm范例
+int FFPlayer::audio_open(int64_t wanted_channel_layout, int wanted_nb_channels, int wanted_sample_rate, AudioParams *audio_hw_params)
+{
+    SDL_AudioSpec wanted_spec;
+    // 音频参数设置SDL_AudioSpec
+    wanted_spec.freq = wanted_sample_rate;          // 采样频率
+    wanted_spec.format = AUDIO_S16SYS; // 采样点格式
+    wanted_spec.channels = wanted_nb_channels;          // 2通道
+    wanted_spec.silence = 0;
+    wanted_spec.samples = 2048;       // 23.2ms -> 46.4ms 每次读取的采样数量，多久产生一次回调和 samples
+    wanted_spec.callback = sdl_audio_callback; // 回调函数
+    wanted_spec.userdata = this;
+
+//    SDL_OpenAudioDevice
+    //打开音频设备
+    if(SDL_OpenAudio(&wanted_spec, NULL) != 0)
+    {
+        printf("Failed to open audio device, %s\n", SDL_GetError());
+        return -1;
+    }
+
+
+    // wanted_spec是期望的参数，spec是实际的参数，wanted_spec和spec都是SDL中的结构。
+    // 此处audio_hw_params是FFmpeg中的参数，输出参数供上级函数使用
+    // audio_hw_params保存的参数，就是在做重采样的时候要转成的格式。
+    audio_hw_params->fmt = AV_SAMPLE_FMT_S16;
+    audio_hw_params->freq = wanted_spec.freq;
+    audio_hw_params->channel_layout = wanted_channel_layout;
+    audio_hw_params->channels =  wanted_spec.channels;
+    /* audio_hw_params->frame_size这里只是计算一个采样点占用的字节数 */
+    audio_hw_params->frame_size = av_samples_get_buffer_size(NULL, audio_hw_params->channels,
+                                                             1, audio_hw_params->fmt, 1);
+    audio_hw_params->bytes_per_sec = av_samples_get_buffer_size(NULL, audio_hw_params->channels,
+                                                                audio_hw_params->freq,
+                                                                audio_hw_params->fmt, 1);
+    if (audio_hw_params->bytes_per_sec <= 0 || audio_hw_params->frame_size <= 0) {
+        av_log(NULL, AV_LOG_ERROR, "av_samples_get_buffer_size failed\n");
+        return -1;
+    }
+    // 比如2帧数据，一帧就是1024个采样点， 1024*2*2 * 2 = 8192字节
+    return wanted_spec.size;	/* SDL内部缓存的数据字节, samples * channels *byte_per_sample */
+}
+
+void FFPlayer::audio_close()
+{
+    SDL_CloseAudio();  // SDL_CloseAudioDevice
+}
+
 int FFPlayer::read_thread()
 {
     int err, i, ret;
@@ -502,6 +592,30 @@ int FFPlayer::read_thread()
         if(abort_request) {
             break;
         }
+
+        // 7.读取媒体数据，得到的是音视频分离后、解码前的数据
+        ret = av_read_frame(ic, pkt); // 调用不会释放pkt的数据，需要我们自己去释放packet的数据
+        if(ret < 0) { // 出错或者已经读取完毕了
+            if ((ret == AVERROR_EOF || avio_feof(ic->pb)) && !eof) {        // 读取完毕了
+                eof = 1;
+            }
+            if (ic->pb && ic->pb->error)  // io异常 // 退出循环
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));     // 读取完数据了，这里可以使用timeout的方式休眠等待下一步的检测
+            continue;		// 继续循环
+        } else {
+            eof = 0;
+        }
+        // 插入队列  先只处理音频包
+        if (pkt->stream_index == audio_stream) {
+            printf("audio ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
+            packet_queue_put(&audioq, pkt);
+        } else if (pkt->stream_index == video_stream) {
+            printf("video ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
+            packet_queue_put(&videoq, pkt);
+        } else {
+            av_packet_unref(pkt);// // 不入队列则直接释放数据
+        }
     }
 
     std::cout << __FUNCTION__ << " leave" << std::endl;
@@ -509,6 +623,51 @@ int FFPlayer::read_thread()
 fail:
 
     return 0;
+}
+/* polls for possible required screen refresh at least this often, should be less than 1/fps */
+#define REFRESH_RATE 0.04  // 每帧休眠10ms
+
+// 默认是10ms检测一次是不是下一帧要输出了
+// 如果只差5ms输出 remaining_time =
+int FFPlayer::video_refresh_thread()
+{
+    double remaining_time = 0.0;
+    while (!abort_request) {
+        if (remaining_time > 0.0)
+            av_usleep((int)(int64_t)(remaining_time * 1000000.0));
+        remaining_time = REFRESH_RATE;
+        video_refresh(&remaining_time);
+    }
+    std::cout << __FUNCTION__ << " leave" << std::endl;
+}
+
+void FFPlayer::video_refresh(double *remaining_time)
+{
+    Frame *vp = NULL;
+    // 目前我们先是只有队列里面有视频帧可以播放，就先播放出来
+    // 判断有没有视频画面
+    if(video_st) {
+        if (frame_queue_nb_remaining(&pictq) == 0) {
+            // 什么都不用做，可以直接退出了
+            return;
+        }
+
+        // 能跑到这里说明帧队列不为空，肯定有frame可以读取
+        vp = frame_queue_peek(&pictq);  // 读取待显示帧
+        // 刷新显示
+        if(video_refresh_callback_)
+            video_refresh_callback_(vp);
+        else
+            std::cout << __FUNCTION__ << " video_refresh_callback_ NULL" << std::endl;
+
+        frame_queue_next(&pictq);   // 当前vp帧出队列
+    }
+}
+
+void FFPlayer::AddVideoRefreshCallback(
+        std::function<int (const Frame *)> callback)
+{
+    video_refresh_callback_ = callback;
 }
 
 Decoder::Decoder()
