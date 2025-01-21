@@ -83,7 +83,12 @@ int FFPlayer::stream_open(const char *file_name)
 
 
     // 初始化时钟
-
+    /*
+     * 初始化时钟
+     * 时钟序列->queue_serial，实际上指向的是is->videoq.serial
+     */
+	//init_clock(&vidclk);
+    init_clock(&audclk);
     // 初始化音量等
 
     // 创建解复用器读数据线程read_thread
@@ -300,8 +305,7 @@ static int audio_decode_frame(FFPlayer *is)
                                            af->frame->nb_samples,
                                            (enum AVSampleFormat)af->frame->format, 1);
     // 获取声道布局
-    dec_channel_layout = 2;
-            (af->frame->channel_layout &&
+    dec_channel_layout =  (af->frame->channel_layout &&
              af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
                 af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
     // 获取样本数校正值：若同步时钟是音频，则不调整样本数；否则根据同步需要调整样本数
@@ -392,6 +396,11 @@ static int audio_decode_frame(FFPlayer *is)
         resampled_data_size = data_size;
     }
 
+    if (!isnan(af->pts))
+        is->audio_clock = af->pts;   
+    else
+        is->audio_clock = NAN;
+
     frame_queue_next(&is->sampq);
 
     ret = resampled_data_size;
@@ -445,6 +454,13 @@ static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
         /* 更新is->audio_buf_index，指向audio_buf中未被拷贝到stream的数据（剩余数据）的起始位置 */
         is->audio_buf_index += len1;
     }
+
+//    is->audio_write_buf_size = is->audio_buf_size - is->audio_buf_index;
+    /* Let's assume the audio driver that is used by SDL has two periods. */
+    if (!isnan(is->audio_clock)) {
+        // 设置时钟
+        set_clock(&is->audclk, is->audio_clock);
+    }
 }
 
 
@@ -479,7 +495,8 @@ int FFPlayer::audio_open(int64_t wanted_channel_layout, int wanted_nb_channels, 
     audio_hw_params->channels =  wanted_spec.channels;
     /* audio_hw_params->frame_size这里只是计算一个采样点占用的字节数 */
     audio_hw_params->frame_size = av_samples_get_buffer_size(NULL, audio_hw_params->channels,
-                                                             1, audio_hw_params->fmt, 1);
+                                                                1,
+                                                                audio_hw_params->fmt, 1);
     audio_hw_params->bytes_per_sec = av_samples_get_buffer_size(NULL, audio_hw_params->channels,
                                                                 audio_hw_params->freq,
                                                                 audio_hw_params->fmt, 1);
@@ -625,10 +642,7 @@ fail:
     return 0;
 }
 /* polls for possible required screen refresh at least this often, should be less than 1/fps */
-#define REFRESH_RATE 0.04  // 每帧休眠10ms
-
-// 默认是10ms检测一次是不是下一帧要输出了
-// 如果只差5ms输出 remaining_time =
+#define REFRESH_RATE 0.01  // 每帧休眠10ms
 int FFPlayer::video_refresh_thread()
 {
     double remaining_time = 0.0;
@@ -654,6 +668,18 @@ void FFPlayer::video_refresh(double *remaining_time)
 
         // 能跑到这里说明帧队列不为空，肯定有frame可以读取
         vp = frame_queue_peek(&pictq);  // 读取待显示帧
+
+        // 对比audio的时间戳
+        double diff = vp->pts - get_clock(&audclk);// get_master_clock();
+
+         std::cout << __FUNCTION__ << "vp->pts:" << vp->pts << " - af->pts:" << get_clock(&audclk) << ", diff:" << diff << std::endl;
+
+        if(diff > 0) {
+            *remaining_time = FFMIN(*remaining_time, diff);
+            return;
+        }
+
+
         // 刷新显示
         if(video_refresh_callback_)
             video_refresh_callback_(vp);
@@ -668,6 +694,41 @@ void FFPlayer::AddVideoRefreshCallback(
         std::function<int (const Frame *)> callback)
 {
     video_refresh_callback_ = callback;
+}
+
+int FFPlayer::get_master_sync_type()
+{
+    if (av_sync_type == AV_SYNC_VIDEO_MASTER) {
+        if (video_st)
+            return AV_SYNC_VIDEO_MASTER;
+        else
+            return AV_SYNC_AUDIO_MASTER;	 /* 如果没有视频成分则使用 audio master */
+    } else if (av_sync_type == AV_SYNC_AUDIO_MASTER) {
+        if (audio_st)
+            return AV_SYNC_AUDIO_MASTER;
+        else if(video_st)
+            return AV_SYNC_VIDEO_MASTER;        // 只有音频的存在
+        else
+            return AV_SYNC_UNKNOW_MASTER;
+    }
+}
+
+double FFPlayer::get_master_clock()
+{
+    double val;
+
+    switch (get_master_sync_type()) {
+    case AV_SYNC_VIDEO_MASTER:
+//        val = get_clock(&vidclk);
+        break;
+    case AV_SYNC_AUDIO_MASTER:
+        val = get_clock(&audclk);
+        break;
+    default:
+        val = get_clock(&audclk);
+        break;
+    }
+    return val;
 }
 
 Decoder::Decoder()
